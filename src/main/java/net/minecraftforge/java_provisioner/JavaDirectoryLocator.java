@@ -12,7 +12,6 @@ import java.util.List;
 import net.minecraftforge.java_provisioner.Disco.Arch;
 import net.minecraftforge.java_provisioner.api.IJavaInstall;
 import net.minecraftforge.java_provisioner.util.OS;
-import net.minecraftforge.java_provisioner.util.ProcessUtils;
 
 /*
  * Attempts to find the java install from specific folders.

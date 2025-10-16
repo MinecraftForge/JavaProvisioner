@@ -109,18 +109,16 @@ public class ProcessUtils {
 
         BufferedReader is = new BufferedReader(new InputStreamReader(process.getInputStream()));
 
-        while (process.isAlive()) {
-            try {
-                while (is.ready()) {
-                    String line = is.readLine();
-                    if (line != null)
-                        lines.add(line);
-                }
-            } catch (IOException e) {
-                getStackTrace(e, lines);
-                process.destroy();
-                return -2;
+        try {
+            while (process.isAlive() || is.ready()) {
+                String line = is.readLine();
+                if (line != null)
+                    lines.add(line);
             }
+        } catch (IOException e) {
+            getStackTrace(e, lines);
+            process.destroy();
+            return -2;
         }
 
         return process.exitValue();
