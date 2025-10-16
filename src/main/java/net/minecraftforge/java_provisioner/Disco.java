@@ -562,8 +562,8 @@ public class Disco {
 
         AMD64(X64, "amd64", "amd64", "_amd64"),
         ARM,
-        ARM32(X86, "arm32", "arm32", "aarch32", "armv6", "armv7l", "armv7"),
-        ARM64(X64, "arm64", "arm64", "armv8"),
+        ARM32("arm32", "arm32", "aarch32", "armv6", "armv7l", "armv7"),
+        ARM64("arm64", "arm64", "armv8"),
         MIPS,
         PPC64EL(PPC64),
         PPC64LE(PPC64),
