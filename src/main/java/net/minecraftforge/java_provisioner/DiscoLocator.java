@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.List;
 
 import net.minecraftforge.java_provisioner.Disco.Arch;
+import net.minecraftforge.java_provisioner.Disco.Distro;
 import net.minecraftforge.java_provisioner.api.IJavaInstall;
 import net.minecraftforge.java_provisioner.util.OS;
 
@@ -95,15 +96,27 @@ public class DiscoLocator extends JavaHomeLocator {
             }
         };
 
-        List<Disco.Package> jdks = disco.getPackages(version);
-        Disco.Package pkg = null;
+        List<Disco.Package> jdks = disco.getPackages(version, OS.CURRENT, Distro.TEMURIN, Arch.CURRENT);
         if (jdks == null || jdks.isEmpty()) {
-            log("Failed to find any distros drom Disco for " + version + " " + OS.CURRENT + " " + Arch.CURRENT);
-        } else {
-            log("Found " + jdks.size() + " download canidates");
-            pkg = jdks.get(0);
-            log("Selected " + pkg.distribution + ": " + pkg.filename);
+            log("Failed to find any distros from Disco for " + version + " " + OS.CURRENT + " " + Arch.CURRENT + " " + Distro.TEMURIN);
+
+            // Try any vendor
+            jdks = disco.getPackages(version, OS.CURRENT, null, Arch.CURRENT);
+            if (jdks == null || jdks.isEmpty()) {
+                log("Failed to find any distros from Disco for " + version + " " + OS.CURRENT + " " + Arch.CURRENT);
+
+                // Try any Architecture and just hope for the best
+                jdks = disco.getPackages(version, OS.CURRENT, null, null);
+                if (jdks == null || jdks.isEmpty()) {
+                    log("Failed to find any distros from Disco for " + version + " " + OS.CURRENT);
+                    return null;
+                }
+            }
         }
+
+        log("Found " + jdks.size() + " download canidates");
+        Disco.Package pkg = jdks.get(0);
+        log("Selected " + pkg.distribution + ": " + pkg.filename);
 
         File java_home = disco.extract(pkg);
 
