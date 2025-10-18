@@ -8,28 +8,30 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
-import net.minecraftforge.java_provisioner.Disco.Arch;
-import net.minecraftforge.java_provisioner.api.IJavaInstall;
-import net.minecraftforge.java_provisioner.util.OS;
+import net.minecraftforge.java_provisioner.api.JavaInstall;
+import net.minecraftforge.java_provisioner.api.JavaProvisionerException;
+import net.minecraftforge.util.os.OS;
+import org.jetbrains.annotations.Nullable;
 
 /*
  * Attempts to find the java install from specific folders.
  * Will search the folder, and immediate sub-folders.
  */
-public class JavaDirectoryLocator extends JavaHomeLocator {
+final class JavaDirectoryLocator extends JavaHomeLocator {
     private final Collection<File> paths;
 
     private static Collection<File> guesses() {
         Collection<File> ret = new ArrayList<>();
-        if (OS.CURRENT == OS.WINDOWS) { // Windows
-            File[] roots = File.listRoots();
-            for(int i = 0; i < roots.length ; i++) {
-                ret.add(new File(roots[i], "Program Files\\Java"));
-                if (Arch.CURRENT.is64Bit())
-                    ret.add(new File(roots[i], "Program Files (x86)\\Java"));
+        if (OS.current() == OS.WINDOWS) { // Windows
+            for (File root : File.listRoots()) {
+                ret.add(new File(root, "Program Files\\Java"));
+                if (Disco.Arch.CURRENT.is64Bit())
+                    ret.add(new File(root, "Program Files (x86)\\Java"));
             }
-        } else if (OS.CURRENT == OS.OSX) { // Mac
+        } else if (OS.current() == OS.MACOS) { // Mac
             ret.add(new File("/Library/Java/JavaVirtualMachines"));
         } else { // Linux
             ret.add(new File("/usr/java"));
@@ -58,7 +60,7 @@ public class JavaDirectoryLocator extends JavaHomeLocator {
 
     private Collection<File> expand(Collection<File> files) {
         Collection<File> ret = new ArrayList<>();
-        String exe = "bin/java" + OS.CURRENT.exe();
+        String exe = "bin/java" + OS.current().exe();
         for (File file : files) {
             if (new File(file, exe).exists())
                 ret.add(file);
@@ -76,23 +78,29 @@ public class JavaDirectoryLocator extends JavaHomeLocator {
     }
 
     @Override
-    public File find(int version) {
+    public File find(int version) throws JavaProvisionerException {
         for (File path : paths) {
-            IJavaInstall result = fromPath(path);
-            if (result != null && result.majorVersion() == version)
-                return result.home();
+            JavaInstall install = fromPath(path, version);
+            if (install != null)
+                return install.home();
         }
-        return null;
+
+        throw new JavaProvisionerException(String.format("Failed to find any Java installations from paths: %s", this.paths.stream().map(File::getPath).collect(Collectors.joining(", "))), logOutput());
     }
 
     @Override
-    public List<IJavaInstall> findAll() {
-        List<IJavaInstall> ret = new ArrayList<>();
+    public List<JavaInstall> findAll(int version) {
+        List<JavaInstall> ret = new ArrayList<>();
+
         for (File path : paths) {
-            IJavaInstall result = fromPath(path);
-            if (result != null)
-                ret.add(result);
+            JavaInstall install = fromPath(path, version);
+            if (install != null)
+                ret.add(install);
         }
+
+        if (ret.isEmpty())
+            log(String.format("Failed to find any Java installations from paths: %s", this.paths.stream().map(File::getPath).collect(Collectors.joining(", "))));
+
         return ret;
     }
 }

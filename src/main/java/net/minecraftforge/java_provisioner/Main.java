@@ -17,14 +17,16 @@ import joptsimple.AbstractOptionSpec;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
-import net.minecraftforge.java_provisioner.Disco.Arch;
-import net.minecraftforge.java_provisioner.Disco.Distro;
-import net.minecraftforge.java_provisioner.api.IJavaInstall;
-import net.minecraftforge.java_provisioner.api.IJavaLocator;
-import net.minecraftforge.java_provisioner.util.OS;
-import net.minecraftforge.util.logging.Log;
+import net.minecraftforge.java_provisioner.api.Distro;
+import net.minecraftforge.java_provisioner.api.JavaInstall;
+import net.minecraftforge.java_provisioner.api.JavaLocator;
+import net.minecraftforge.util.os.OS;
+import org.jetbrains.annotations.VisibleForTesting;
 
-public class Main {
+@VisibleForTesting
+public final class Main {
+    private Main() { }
+
     public static void main(String[] args) throws Exception {
         OptionParser parser = new OptionParser();
 
@@ -54,13 +56,13 @@ public class Main {
 
         OptionSet options = parser.parse(args);
         if (options.has(helpO)) {
-            parser.printHelpOn(Log.INFO);
+            parser.printHelpOn(System.out);
             return;
         }
         File cache = options.valueOf(cacheO);
         DiscoLocator disco = new DiscoLocator(cache, options.has(offlineO));
 
-        List<IJavaLocator> locators = new ArrayList<>();
+        List<JavaLocator> locators = new ArrayList<>();
         locators.add(new JavaHomeLocator());
         locators.add(new GradleLocator());
         locators.add(new JavaDirectoryLocator());
@@ -70,8 +72,8 @@ public class Main {
             // populate downloaded for testing
             Disco tmp = new Disco(cache);
             int version = options.has(versionO) ? options.valueOf(versionO) : 22;
-            for (Distro dist : new Distro[] { Distro.TEMURIN, Distro.AOJ, Distro.ORACLE, Distro.ZULU, Distro.GRAALVM, Distro.GRAALVM_COMMUNITY}) {
-                List<Disco.Package> jdks = tmp.getPackages(version, OS.CURRENT, dist, Arch.CURRENT);
+            for (Distro dist : new Distro[] { Distro.TEMURIN, Distro.AOJ, Distro.ORACLE, Distro.ZULU, Distro.GRAALVM, Distro.GRAALVM_COMMUNITY }) {
+                List<Disco.Package> jdks = tmp.getPackages(version, OS.current(), dist, Disco.Arch.CURRENT);
                 int seen = 0;
                 for (Disco.Package pkg : jdks) {
                     if (seen++ < 3)
@@ -86,8 +88,8 @@ public class Main {
             int version = options.valueOf(versionO);
             findSpecificVersion(locators, disco, version);
         } else {
-            Log.error("You must specify a version to search for using --version or --all to list all java installs.");
-            parser.printHelpOn(Log.INFO);
+            System.err.println("You must specify a version to search for using --version or --all to list all java installs.");
+            parser.printHelpOn(System.out);
             System.exit(-1);
         }
     }
@@ -101,61 +103,71 @@ public class Main {
         return false;
     }
 
-    private static void findSpecificVersion(List<IJavaLocator> locators, DiscoLocator disco, int version) {
+    private static void findSpecificVersion(List<JavaLocator> locators, DiscoLocator disco, int version) {
         File result = null;
-        for (IJavaLocator locator : locators) {
-            result = locator.find(version);
-            if (result != null)
+        for (JavaLocator locator : locators) {
+            try {
+                result = locator.find(version);
                 break;
+            } catch (Exception e) {
+                continue;
+            }
         }
 
-        // Could not find it with a locator, lets try downloading it.
+        // Could not find it with a locator, let's try downloading it.
+        System.out.println("Locators failed to find any suitable installs, attempting Disco download");
+        Throwable error = null;
         if (result == null) {
-            IJavaInstall probe = disco.provision(version);
-            if (probe != null)
-                result = probe.home();
+            try {
+                result = disco.provision(version).home();
+            } catch (Exception e) {
+                error = e;
+            }
         }
 
         if (result != null && result.exists()) {
             String home = result.getAbsolutePath();
             if (!home.endsWith(File.separator))
                 home += File.separatorChar;
-            Log.info(home);
+            System.out.println(home);
         } else {
-            Log.error("Failed to find sutable java for version " + version);
-            for (IJavaLocator locator : locators) {
-                Log.error("Locator: " + locator.getClass().getSimpleName());
+            System.err.println("Failed to find sutable java for version " + version);
+            for (JavaLocator locator : locators) {
+                System.err.println("Locator: " + locator.getClass().getSimpleName());
                 for (String line : locator.logOutput()) {
-                    Log.error("  " + line);
+                    System.err.println("  " + line);
                 }
+            }
+            if (error != null) {
+                error.printStackTrace(System.err);
             }
             System.exit(1);
         }
     }
 
-    private static void listAllJavaInstalls(List<IJavaLocator> locators) {
-        List<IJavaInstall> installs = new ArrayList<>();
+    private static void listAllJavaInstalls(List<JavaLocator> locators) {
+        List<JavaInstall> installs = new ArrayList<>();
 
-        for (IJavaLocator locator : locators) {
-            List<IJavaInstall> found = locator.findAll();
+        for (JavaLocator locator : locators) {
+            List<JavaInstall> found = locator.findAll();
             installs.addAll(found);
         }
 
         // Remove duplicates
-        Set<File> seen = new HashSet<File>();
-        for (Iterator<IJavaInstall> itr = installs.iterator(); itr.hasNext(); ) {
-            IJavaInstall install = itr.next();
+        Set<File> seen = new HashSet<>();
+        for (Iterator<JavaInstall> itr = installs.iterator(); itr.hasNext(); ) {
+            JavaInstall install = itr.next();
             if (!seen.add(install.home()))
                 itr.remove();
         }
 
         Collections.sort(installs);
 
-        for (IJavaInstall install : installs) {
-            Log.info(install.home().getAbsolutePath());
-            Log.info("  Vendor:  " + install.vendor());
-            Log.info("  Type:    " + (install.isJdk() ? "JDK" : "JRE"));
-            Log.info("  Version: " + install.version());
+        for (JavaInstall install : installs) {
+            System.out.println(install.home().getAbsolutePath());
+            System.out.println("  Vendor:  " + install.vendor());
+            System.out.println("  Type:    " + (install.isJdk() ? "JDK" : "JRE"));
+            System.out.println("  Version: " + install.version());
         }
 
     }

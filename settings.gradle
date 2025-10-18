@@ -4,8 +4,9 @@ plugins {
 
 dependencyResolutionManagement {
     repositories {
-        maven { url = 'https://maven.minecraftforge.net/' }
         mavenCentral()
+        maven { url = 'https://maven.minecraftforge.net/' }
+        mavenLocal()
     }
 
     versionCatalogs.register('libs') {
@@ -13,14 +14,16 @@ dependencyResolutionManagement {
         plugin 'gradleutils', 'net.minecraftforge.gradleutils' version '2.6.0'
         plugin 'shadow', 'com.gradleup.shadow' version '9.0.0-beta13'
 
+        library 'nulls', 'org.jetbrains:annotations:26.0.2-1'
+
         library 'gson', 'com.google.code.gson:gson:2.10.1'           // > 2.9.0 needs Java 7
         library 'jopt', 'net.sf.jopt-simple:jopt-simple:6.0-alpha-3' // Java 8
         library 'jtar', 'org.kamranzafar:jtar:2.3'
 
-        library 'utils-download', 'net.minecraftforge', 'download-utils' version '0.3.0'
+        library 'utils-download', 'net.minecraftforge', 'download-utils'  version '0.4.0'
         library 'utils-hash', 'net.minecraftforge', 'hash-utils' version '0.1.9'
-        library 'utils-logging', 'net.minecraftforge', 'log-utils' version '0.3.0'
-        bundle 'utils', ['utils-download', 'utils-hash', 'utils-logging']
+        library 'utils-os', 'net.minecraftforge', 'os-utils' version '0.1.0'
+        bundle 'utils', ['utils-download', 'utils-hash', 'utils-os']
     }
 }
 

@@ -49,6 +49,8 @@ tasks.register('javaProbeJar', Jar) {
 }
 
 dependencies {
+    compileOnly libs.nulls
+
     implementation libs.jopt
     implementation libs.gson
     implementation libs.jtar

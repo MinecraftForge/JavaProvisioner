@@ -12,11 +12,14 @@ import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
 import joptsimple.util.EnumConverter;
-import net.minecraftforge.java_provisioner.util.OS;
-import net.minecraftforge.java_provisioner.util.ProcessUtils;
-import net.minecraftforge.util.logging.Log;
+import net.minecraftforge.java_provisioner.api.Distro;
+import net.minecraftforge.util.os.OS;
+import org.jetbrains.annotations.VisibleForTesting;
 
-public class DiscoMain {
+@VisibleForTesting
+public final class DiscoMain {
+    private DiscoMain() { }
+
     public static void main(String[] args) throws Exception {
         OptionParser parser = new OptionParser();
         parser.allowsUnrecognizedOptions();
@@ -37,10 +40,10 @@ public class DiscoMain {
                 .withRequiredArg().withValuesConvertedBy(converter(Disco.Arch.class)).defaultsTo(Disco.Arch.CURRENT);
         OptionSpec<OS> osO = parser.acceptsAll(l("os", "operating-system"),
                 "Operating System for use in Disco api")
-                .withRequiredArg().withValuesConvertedBy(converter(OS.class)).defaultsTo(OS.CURRENT);
-        OptionSpec<Disco.Distro> distroO = parser.acceptsAll(l("distro", "distribution"),
+                .withRequiredArg().withValuesConvertedBy(converter(OS.class)).defaultsTo(OS.current());
+        OptionSpec<Distro> distroO = parser.acceptsAll(l("distro", "distribution"),
                 "Distribution for use in Disco api")
-                .withRequiredArg().withValuesConvertedBy(converter(Disco.Distro.class)).defaultsTo(Disco.Distro.TEMURIN);
+                                           .withRequiredArg().withValuesConvertedBy(converter(Distro.class)).defaultsTo(Distro.MICROSOFT);
         OptionSpec<Void> autoO = parser.accepts("auto",
                 "Auto select a JDK to download without prompting if there are multiple options");
 
@@ -51,7 +54,7 @@ public class DiscoMain {
 
         boolean success = true;
         if (options.has(helpO)) {
-            parser.printHelpOn(Log.INFO);
+            parser.printHelpOn(System.out);
         } else if (options.has(downloadJdkO)) {
             success = downloadJdk(
                 options.hasArgument(javeVersionO) ? javeVersionO.value(options) : -1,
@@ -62,7 +65,7 @@ public class DiscoMain {
                 cache
             );
         } else {
-            parser.printHelpOn(Log.INFO);
+            parser.printHelpOn(System.out);
         }
 
         if (!success)
@@ -74,43 +77,44 @@ public class DiscoMain {
     }
 
     private static boolean downloadJdk(
-        int javaVersion, Disco.Arch arch, OS os, Disco.Distro distro,
+        int javaVersion, Disco.Arch arch, OS os, Distro distro,
         boolean auto, File cache
     ) {
-
         if (arch == Disco.Arch.UNKNOWN) {
             arch = Disco.Arch.X64;
-            Log.warn("Unknown Architecture (" + System.getProperty("os.arch") + ")" +
+            System.out.println("Unknown Architecture (" + System.getProperty("os.arch") + ")" +
                 " Defaulting to " + arch.name() + "." +
                 " Use --arch to specify an alternative.");
         }
 
         if (os == OS.UNKNOWN) {
             os = OS.LINUX;
-            Log.warn("Unknown Operating System (" + System.getProperty("os.name") + ")" +
+            System.out.println("Unknown Operating System (" + System.getProperty("os.name") + ")" +
                 " Defaulting to " + os.name() + "." +
                 " Use --os to specify an alternative.");
         }
 
-        Log.info("Downloading JDK:");
-        Log.info("    Version: " + (javaVersion == -1 ? "latest" : javaVersion));
-        Log.info("    Arch:    " + (arch   == null ? "null" : arch  .name()));
-        Log.info("    OS:      " + (os     == null ? "null" : os    .name()));
-        Log.info("    Distro:  " + (distro == null ? "null" : distro.name()));
-        Log.info("    Cache:   " + cache.getAbsolutePath());
+        System.out.println("Downloading JDK:");
+        System.out.println("  Version: " + (javaVersion == -1 ? "latest" : javaVersion));
+        System.out.println("  Arch:    " + (arch   == null ? "null" : arch  .name()));
+        System.out.println("  OS:      " + (os     == null ? "null" : os    .name()));
+        System.out.println("  Distro:  " + (distro == null ? "null" : distro.name()));
+        System.out.println("  Cache:   " + cache.getAbsolutePath());
         Disco disco = new Disco(new File(cache, "jdks"));
 
         List<Disco.Package> jdks = disco.getPackages(javaVersion, os, distro, arch);
-        Disco.Package pkg = null;
-        if (jdks == null || jdks.isEmpty()) {
-            Log.error("Failed to find any download, try specifying a different java version or distro");
+        if (jdks.isEmpty()) {
+            System.err.println("Failed to find any download, try specifying a different java version or distro");
             return false;
-        } else if (jdks.size() == 1 || auto) {
+        }
+
+        Disco.Package pkg;
+        if (jdks.size() == 1 || auto) {
             pkg = jdks.get(0);
-        } else if (jdks.size() > 1) {
+        } else {
             for (int x = 0; x < jdks.size(); x++) {
                 Disco.Package jdk = jdks.get(x);
-                Log.info(String.format("[%2d] %s: %s", x+1, jdk.distribution, jdk.filename));
+                System.out.printf("[%2d] %s: %s%n", x+1, jdk.distribution, jdk.filename);
                 //log(Disco.GSON.toJson(jdk));
             }
 
@@ -123,28 +127,34 @@ public class DiscoMain {
             try {
                 selected = Integer.parseInt(line);
             } catch (NumberFormatException e) {
-                Log.error("Invalid selection \"" + line + "\" is not a number.");
+                System.err.println("Invalid selection \"" + line + "\" is not a number.");
             }
 
             if (selected <= 0 || selected > jdks.size()) {
-                Log.error("Invalid selection, must be between 1 and " + jdks.size());
+                System.err.println("Invalid selection, must be between 1 and " + jdks.size());
                 return false;
             } else
                 pkg = jdks.get(selected - 1);
         }
 
-        Log.info();
+        System.out.println();
 
-        File java_home = disco.extract(pkg);
+        File java_home;
+        try {
+            java_home = disco.extract(pkg);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to extract downloaded package", e);
+        }
 
-        if (java_home == null)
-            System.exit(1);
+        // No longer needed as we throw if no java home, but just in case:
+        //if (java_home == null)
+        //    System.exit(1);
 
         ProcessUtils.Result result = ProcessUtils.testJdk(java_home);
         if (result.exitCode != 0) {
-            Log.error("Failed to run extracted java:");
+            System.err.println("Failed to run extracted java:");
             for (String line : result.lines)
-                Log.error(line);
+                System.err.println("  " + line);
 
             return false;
         }

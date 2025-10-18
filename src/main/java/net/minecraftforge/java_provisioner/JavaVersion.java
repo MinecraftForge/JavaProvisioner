@@ -4,6 +4,9 @@
  */
 package net.minecraftforge.java_provisioner;
 
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.UnknownNullability;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -62,7 +65,7 @@ public final class JavaVersion implements Comparable<JavaVersion> {
         return val;
     }
 
-    public static JavaVersion nullableParse(String s) {
+    public @Nullable static JavaVersion nullableParse(String s) {
         try {
             return parse(s);
         } catch (IllegalArgumentException e) {

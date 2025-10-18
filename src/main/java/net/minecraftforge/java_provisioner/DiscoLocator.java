@@ -8,11 +8,14 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
-import net.minecraftforge.java_provisioner.Disco.Arch;
-import net.minecraftforge.java_provisioner.Disco.Distro;
-import net.minecraftforge.java_provisioner.api.IJavaInstall;
-import net.minecraftforge.java_provisioner.util.OS;
+import net.minecraftforge.java_provisioner.api.Distro;
+import net.minecraftforge.java_provisioner.api.JavaInstall;
+import net.minecraftforge.java_provisioner.api.JavaProvisioner;
+import net.minecraftforge.java_provisioner.api.JavaProvisionerException;
+import net.minecraftforge.util.os.OS;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Locates java installs that have been downloaded from the <a href="https://github.com/foojayio/discoapi">disco API</a>
@@ -30,7 +33,7 @@ import net.minecraftforge.java_provisioner.util.OS;
  * <p>
  * If this becomes and issue {it hasn't in the 10 years that FG has not given a fuck} then I can re-address this.
  */
-public class DiscoLocator extends JavaHomeLocator {
+final class DiscoLocator extends JavaHomeLocator implements JavaProvisioner {
     private final File cache;
     private final boolean offline;
 
@@ -44,47 +47,58 @@ public class DiscoLocator extends JavaHomeLocator {
     }
 
     @Override
-    public File find(int version) {
-        List<IJavaInstall> results = findInternal(version);
-        return results.isEmpty() ? null : results.get(0).home();
+    @SuppressWarnings("DataFlowIssue")
+    public File find(int version) throws JavaProvisionerException {
+        return findInternal(null, version).home();
     }
 
     @Override
-    public List<IJavaInstall> findAll() {
-        return findInternal(-1);
+    public List<JavaInstall> findAll() {
+        try {
+            List<JavaInstall> ret = new ArrayList<>();
+            findInternal(ret, -1);
+            return ret;
+        } catch (JavaProvisionerException e) {
+            log(e.getMessage());
+            return Collections.emptyList();
+        }
     }
 
-    private List<IJavaInstall> findInternal(int version) {
+    private @Nullable JavaInstall findInternal(@Nullable List<JavaInstall> results, int version) throws JavaProvisionerException {
         if (!cache.exists() || !cache.isDirectory())
-            return Collections.emptyList();
+            throw new JavaProvisionerException("Java Provisioner has not provisioned any Java installations", logOutput());
 
-        List<IJavaInstall> results = new ArrayList<>();
-        for (File dir : cache.listFiles()) {
+        List<JavaInstall> found = new ArrayList<>();
+
+        File[] listFiles = cache.listFiles();
+        if (listFiles == null)
+            throw new JavaProvisionerException("Could not list contents of Disco cache: " + cache, logOutput());
+
+        for (File dir : listFiles) {
             if (!dir.isDirectory())
                 continue;
 
             log("Disco Cache: \"" + dir.getAbsolutePath() + "\"");
 
-            IJavaInstall ret = fromPath(dir);
-            if (ret != null) {
-                if (version == -1) {
-                    results.add(ret);
-                } else if (ret.majorVersion() != version) {
-                    log("  Wrong version: Was " + ret.majorVersion() + " wanted " + version);
-                } else {
-                    results.add(ret);
-                    return results;
-                }
+            JavaInstall install = fromPath(dir, version);
+            if (install != null) {
+                if (results == null)
+                    return install;
+                else
+                    found.add(install);
             }
         }
 
-        return results;
+        if (found.isEmpty())
+            throw new JavaProvisionerException("Failed to find any Java installations from Disco cache");
+
+        results.addAll(found);
+        return null;
     }
 
     @Override
-    public IJavaInstall provision(int version) {
-        log("Locators failed to find any suitable installs, attempting Disco download");
-        Disco disco = new Disco(cache, offline) { // TODO: [DISCO][Logging] Add a proper logging handler sometime
+    public JavaInstall provision(int version, @Nullable Distro distro) throws JavaProvisionerException {
+        Disco disco = new Disco(cache, offline) {
             @Override
             protected void debug(String message) {
                 DiscoLocator.this.log(message);
@@ -96,34 +110,34 @@ public class DiscoLocator extends JavaHomeLocator {
             }
         };
 
-        List<Disco.Package> jdks = disco.getPackages(version, OS.CURRENT, Distro.TEMURIN, Arch.CURRENT);
-        if (jdks == null || jdks.isEmpty()) {
-            log("Failed to find any distros from Disco for " + version + " " + OS.CURRENT + " " + Arch.CURRENT + " " + Distro.TEMURIN);
+        List<Disco.Package> jdks;
+        try {
+            jdks = disco.getPackages(version, OS.current(), distro, Disco.Arch.CURRENT);
+        } catch (Exception e) {
+            log(String.format("Failed to find any JDKs from Disco for: %s%d - %s %s", distro != null ? distro + " " : "", version, OS.current(), Disco.Arch.CURRENT));
 
-            // Try any vendor
-            jdks = disco.getPackages(version, OS.CURRENT, null, Arch.CURRENT);
-            if (jdks == null || jdks.isEmpty()) {
-                log("Failed to find any distros from Disco for " + version + " " + OS.CURRENT + " " + Arch.CURRENT);
-
-                // Try any Architecture and just hope for the best
-                jdks = disco.getPackages(version, OS.CURRENT, null, null);
-                if (jdks == null || jdks.isEmpty()) {
-                    log("Failed to find any distros from Disco for " + version + " " + OS.CURRENT);
-                    return null;
-                }
+            // Try any Architecture and just hope for the best
+            try {
+                jdks = disco.getPackages(version, OS.current(), distro, null);
+            } catch (Exception suppressed) {
+                log(String.format("Failed to find any JDKs from Disco for: %s%d - %s ANY", distro != null ? distro + " " : "", version, OS.current()));
+                e.addSuppressed(suppressed);
+                throw new JavaProvisionerException("Failed to provision Disco download", e, logOutput());
             }
         }
 
-        log("Found " + jdks.size() + " download canidates");
+        log("Found " + jdks.size() + " download candidates");
         Disco.Package pkg = jdks.get(0);
         log("Selected " + pkg.distribution + ": " + pkg.filename);
 
         File java_home = disco.extract(pkg);
-
         if (java_home == null)
-            return null;
+            throw new JavaProvisionerException("Failed to provision Disco download: " + pkg.filename, logOutput());
 
-        IJavaInstall result = fromPath(java_home);
-        return result;
+        JavaInstall ret = fromPath(java_home);
+        if (ret == null)
+            throw new JavaProvisionerException("Failed to provision Disco download: " + pkg.filename, logOutput());
+
+        return ret;
     }
 }

@@ -7,30 +7,33 @@ package net.minecraftforge.java_provisioner.api;
 import java.io.File;
 
 import net.minecraftforge.java_provisioner.JavaVersion;
+import org.jetbrains.annotations.Nullable;
 
-public interface IJavaInstall extends Comparable<IJavaInstall> {
+public interface JavaInstall extends Comparable<JavaInstall> {
     File home();
     boolean isJdk();
     int majorVersion();
-    String version();
-    String vendor();
+    @Nullable String version();
+    @Nullable String vendor();
 
-    default int compareTo(IJavaInstall o2) {
+    default int compareTo(JavaInstall o2) {
         if (this.isJdk() != o2.isJdk())
             return this.isJdk() ? -1 : 1;
         if (this.majorVersion() != o2.majorVersion())
             return o2.majorVersion() - this.majorVersion();
 
-        if (this.vendor() != null && o2.vendor() == null)
+        String vendor = this.vendor();
+        String oVendor = o2.vendor();
+        if (vendor != null && oVendor == null)
             return -1;
-        else if (this.vendor() == null && o2.vendor() != null)
+        else if (vendor == null && oVendor != null)
             return 1;
-        else if (this.vendor() != null && !this.vendor().equals(o2.vendor())) {
-            int v1 = Util.getVendorOrder(this.vendor());
-            int v2 = Util.getVendorOrder(this.vendor());
+        else if (vendor != null && !vendor.equals(oVendor)) {
+            int v1 = Util.getVendorOrder(vendor);
+            int v2 = Util.getVendorOrder(oVendor);
             if (v1 == v2) {
                 if (v1 == -1)
-                    return this.vendor().compareTo(o2.vendor());
+                    return vendor.compareTo(oVendor);
             } else if (v1 == -1)
                 return 1;
             else if (v2 == -1)
@@ -39,19 +42,21 @@ public interface IJavaInstall extends Comparable<IJavaInstall> {
                 return v1 - v2;
         }
 
-        if (this.version() != null && o2.version() == null)
+        String version = this.version();
+        String oVersion = o2.version();
+        if (version != null && oVersion == null)
             return -1;
-        else if (this.version() == null && o2.version() != null)
+        else if (version == null && oVersion != null)
             return 1;
-        else if (this.version() != null && !this.version().equals(o2.version())) {
-            JavaVersion v1 = JavaVersion.nullableParse(this.version());
-            JavaVersion v2 = JavaVersion.nullableParse(o2.version());
+        else if (version != null && !version.equals(oVersion)) {
+            JavaVersion v1 = JavaVersion.nullableParse(version);
+            JavaVersion v2 = JavaVersion.nullableParse(oVersion);
             if (v1 == null && v2 != null)
                 return 1;
             else if (v1 != null && v2 == null)
                 return -1;
             else if (v1 == null)
-                return this.version().compareTo(o2.version());
+                return version.compareTo(oVersion);
             return v2.compareTo(v1);
         }
 

@@ -2,7 +2,7 @@
  * Copyright (c) Forge Development LLC and contributors
  * SPDX-License-Identifier: LGPL-2.1-only
  */
-package net.minecraftforge.java_provisioner.util;
+package net.minecraftforge.java_provisioner;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -15,6 +15,7 @@ import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -22,20 +23,24 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import net.minecraftforge.java_provisioner.api.IJavaInstall;
+import net.minecraftforge.java_provisioner.api.JavaInstall;
+import net.minecraftforge.util.os.OS;
+import org.jetbrains.annotations.Nullable;
 
-public class ProcessUtils {
-    public static class Result {
-        public final List<String> lines;
-        public final int exitCode;
+final class ProcessUtils {
+    private ProcessUtils() { }
+
+    static class Result {
+        final List<String> lines;
+        final int exitCode;
         private Result(List<String> lines, int exitCode) {
             this.lines = Collections.unmodifiableList(lines);
             this.exitCode = exitCode;
         }
     }
 
-    public static class ProbeResult extends Result {
-        public final IJavaInstall meta;
+    static final class ProbeResult extends Result {
+        final @Nullable JavaInstall meta;
 
         private ProbeResult(File root, Result parent) {
             this(root, parent.exitCode, parent.lines);
@@ -64,7 +69,7 @@ public class ProcessUtils {
 
             String version = get(probe, "java.version", "java.runtime.version", "java.vm.version");
             String vendor = get(probe, "java.vendor", "java.vm.vendor");
-            this.meta = new JavaInstall(root, version, vendor);
+            this.meta = new JavaInstallImpl(root, version, vendor);
 
         }
 
@@ -86,11 +91,10 @@ public class ProcessUtils {
 
     private static void getStackTrace(Throwable t, Collection<String> lines) {
         String[] stack = getStackTrace(t).split("\r?\n");
-        for (String line : stack)
-            lines.add(line);
+        lines.addAll(Arrays.asList(stack));
     }
 
-    public static Result runCommand(String...args) {
+    static Result runCommand(String...args) {
         List<String> lines = new ArrayList<>();
         int exitCode = runCommand(lines, args);
         return new Result(lines, exitCode);
@@ -124,11 +128,11 @@ public class ProcessUtils {
         return process.exitValue();
     }
 
-    protected static Path getPathFromResource(String resource) {
+    static Path getPathFromResource(String resource) {
         return getPathFromResource(resource, ProcessUtils.class.getClassLoader());
     }
 
-    protected static Path getPathFromResource(String resource, ClassLoader cl) {
+    static Path getPathFromResource(String resource, ClassLoader cl) {
         URL url = cl.getResource(resource);
         if (url == null)
             throw new IllegalStateException("Could not find " + resource + " in classloader " + cl);
@@ -146,10 +150,10 @@ public class ProcessUtils {
     // Have to make this not a static string, so the shadow plugin doesn't rewrite it.
     private static final String JAVA_PROBE = "JavaProbe" + ".class".toLowerCase(Locale.ENGLISH);
 
-    public static ProbeResult testJdk(File java_home) {
+    static ProbeResult testJdk(File java_home) {
         File probe = getPathFromResource(JAVA_PROBE).toFile();
         String classpath = probe.getAbsolutePath();
-        File exe = new File(java_home, "bin/java" + OS.CURRENT.exe());
+        File exe = new File(java_home, "bin/java" + OS.current().exe());
 
         if (!exe.exists())
             return new ProbeResult(java_home, -1, Collections.singletonList("missing java executable"));

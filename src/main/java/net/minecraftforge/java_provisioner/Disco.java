@@ -18,9 +18,10 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumMap;
-import java.util.HashSet;
+import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -31,15 +32,19 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
 import com.google.gson.TypeAdapter;
 import com.google.gson.internal.bind.TypeAdapters;
 import com.google.gson.stream.JsonWriter;
 
-import net.minecraftforge.java_provisioner.util.OS;
-import net.minecraftforge.java_provisioner.util.ProcessUtils;
+import net.minecraftforge.java_provisioner.api.Distro;
+import net.minecraftforge.java_provisioner.api.JavaLocator;
+import net.minecraftforge.java_provisioner.api.JavaProvisioner;
+import net.minecraftforge.util.os.OS;
 import net.minecraftforge.util.download.DownloadUtils;
 import net.minecraftforge.util.hash.HashFunction;
-import net.minecraftforge.util.logging.Log;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 import org.kamranzafar.jtar.TarEntry;
 import org.kamranzafar.jtar.TarInputStream;
 
@@ -61,6 +66,7 @@ import com.google.gson.stream.JsonReader;
  *
  * TODO: [DISCO][Threads] Locking files for multiple processes accessing the same cache directory
  */
+@VisibleForTesting
 public class Disco {
     private static final int CACHE_TIMEOUT = 1000 * 60 * 60 * 12; // 12 hours
 
@@ -108,11 +114,11 @@ public class Disco {
     }
 
     protected void debug(String message) {
-        Log.debug(message);
+        System.out.println(message);
     }
 
     protected void error(String message) {
-        Log.error(message);
+        System.err.println(message);
     }
 
     public List<Package> getPackages() {
@@ -121,8 +127,10 @@ public class Disco {
         if (ret != null)
             return ret;
 
-        if (offline)
-            return null;
+        if (offline) {
+            error("Cannot download package list while offline");
+            return Collections.emptyList();
+        }
 
         String url = provider + "/packages/?"
             + "&package_type=jdk" // JDK has everything, could pull just the JRE but who cares.
@@ -131,24 +139,39 @@ public class Disco {
         ;
 
         debug("Downloading package list");
-        String data = DownloadUtils.tryDownloadString(true, url);
-        if (data == null)
-            return null;
+        String data;
+        try {
+            data = DownloadUtils.downloadString(url);
+        } catch (IOException e) {
+            error("Failed to download package list from " + url + ": " + e);
+            return Collections.emptyList();
+        }
 
-        Response<Package> resp = new Response<>(data, Package.class);
+        Response<Package> resp;
+        try {
+            resp = Response.of(data, Package.class);
+        } catch (Exception e) {
+            error("Failed to parse package list from " + url + ": " + e);
+            return Collections.emptyList();
+        }
 
         if (resp.entries().isEmpty()) {
             error("Failed to download any packages from " + url);
-            return null;
+            return Collections.emptyList();
         }
 
-        writeJson(tmp, resp.entries(), List.class);
+        try {
+            writeJson(tmp, resp.entries(), List.class);
+        } catch (IOException e) {
+            error("Failed to write package list to " + tmp.getAbsolutePath() + ": " + e);
+            return Collections.emptyList();
+        }
 
         return resp.entries();
     }
 
     public List<Package> getPackages(int version) {
-        return getPackages(version, OS.CURRENT, Distro.TEMURIN, Arch.CURRENT);
+        return getPackages(version, OS.current(), null, Disco.Arch.CURRENT);
     }
 
     public List<Package> getPackages(int version, OS os, Distro distro, Arch arch) {
@@ -193,45 +216,63 @@ public class Disco {
         return ret;
     }
 
-    public PackageInfo getInfo(Package pkg) {
+    public @Nullable PackageInfo getInfo(Package pkg) {
         File tmp = new File(cache, pkg.filename + ".json");
         DownloadInfo ret = readJson(tmp, TypeToken.get(DownloadInfo.class));
-        if (ret != null && ret.info != null)
+        if (ret != null)
             return ret.info;
+        else
+            error("Failed to read package info from " + tmp.getAbsolutePath());
 
-        if (offline)
+        if (offline) {
+            error("Cannot download package info while offline");
             return null;
+        }
 
         //debug("Downloading package info " + pkg.id);
         String url = provider + "/ids/" + pkg.id;
-        String data = DownloadUtils.tryDownloadString(true, url);
-        if (data == null)
+        String data;
+        try {
+            data = DownloadUtils.downloadString(url);
+        } catch (IOException e) {
+            error("Failed to download package info from " + url + " : " + e);
             return null;
+        }
 
-        Response<PackageInfo> resp = new Response<>(data, PackageInfo.class);
+        Response<PackageInfo> resp;
+        try {
+            resp = Response.of(data, PackageInfo.class);
+        } catch (Exception e) {
+            error("Failed to parse package info from " + url + " : " + e);
+            return null;
+        }
 
         if (resp.entries().isEmpty()) {
-            error("Failed to download package info for "+ pkg.id);
+            error("Failed to download any packages from " + url);
             return null;
         } else if (resp.entries().size() != 1) { // This never happens, but output a warning if it does.
             debug("Warning: Multiple package infos returned from " + url);
         }
 
         ret = new DownloadInfo(pkg, resp.entries().get(0));
-        writeJson(tmp, ret, DownloadInfo.class);
+        try {
+            writeJson(tmp, ret, DownloadInfo.class);
+        } catch (IOException e) {
+            error("Failed to write package info to " + tmp.getAbsolutePath() + " : " + e);
+            return null;
+        }
+
         return ret.info;
     }
 
-    public File download(Package pkg) {
-        PackageInfo info = getInfo(pkg);
-
+    public @Nullable File download(Package pkg) {
         Map<HashFunction, String> checksums = new EnumMap<>(HashFunction.class);
         String download = pkg.links.pkg_download_redirect;
 
         //debug("Downloading " + pkg.filename);
-        if (info == null) {
-            debug("Failed to download package info for \"" + pkg.filename + "\" (" + pkg.id + ") , assuming redirect link is valid");
-        } else {
+        try {
+            PackageInfo info = getInfo(pkg);
+
             if (info.checksum != null && info.checksum_type != null) {
                 HashFunction func = HashFunction.find(info.checksum_type);
                 if (func != null)
@@ -239,61 +280,68 @@ public class Disco {
                 else
                     debug("Unknown Checksum " + info.checksum_type + ": " + info.checksum);
             } else if (info.checksum_uri != null && !offline) {
-                String raw = DownloadUtils.tryDownloadString(true, info.checksum_uri);
-                if (raw != null) {
+                try {
+                    String raw = DownloadUtils.downloadString(info.checksum_uri);
+
                     String checksum = raw.split(" ")[0];
                     HashFunction func = HashFunction.findByHash(checksum);
                     if (func != null)
                         checksums.put(func, checksum);
                     else
                         debug("Unknown Checksum " + checksum);
+                } catch (IOException e) {
+                    error("Failed to download checksum from " + info.checksum_uri + " : " + e);
                 }
             }
 
             if (info.direct_download_uri != null)
                 download = info.direct_download_uri;
+        } catch (Exception e) {
+            debug("Failed to download package info for \"" + pkg.filename + "\" (" + pkg.id + ") , assuming redirect link is valid : " + e);
         }
 
         File archive = new File(cache, pkg.filename);
         if (!archive.exists()) {
             if (download == null) {
-                if (offline)
-                    error("Offline mode, can't download " + pkg.filename + " (" + pkg.id + ")");
-                else
-                    error("Failed to find download link for " + pkg.filename + " (" + pkg.id + ")");
+                String message = offline
+                    ? "Offline mode, can't download " + pkg.filename + " (" + pkg.id + ")"
+                    : "Failed to find download link for " + pkg.filename + " (" + pkg.id + ")";
+                error(message);
                 return null;
             }
             debug("Downloading " + download);
-            if (!DownloadUtils.tryDownloadFile(true, archive, download)) {
-                error("Failed to download " + pkg.filename + " from " + download);
+            try {
+                DownloadUtils.downloadFile(archive, download);
+            } catch (Exception e) {
+                String message = "Failed to download " + pkg.filename + " from " + download;
+                error(message);
                 return null;
             }
         }
 
         if (!checksums.isEmpty()) {
             debug("Verifying checksums");
-            boolean success = true;
-            for (HashFunction func : checksums.keySet()) {
+            for (Map.Entry<HashFunction, String> entry : checksums.entrySet()) {
+                HashFunction func = entry.getKey();
                 try {
                     String actual = func.hash(archive);
-                    String expected = checksums.get(func);
+                    String expected = entry.getValue();
                     if (expected.equals(actual)) {
-                        debug("    " + func.name() + " Validated");
+                        debug("  " + func.name() + " Validated");
                     } else {
-                        success = false;
-                        debug("    " + func.name() + " Invalid");
-                        debug("        Expected: " + expected);
-                        debug("        Actual:   " + actual);
+                        debug("  " + func.name() + " Invalid");
+                        debug("    Expected: " + expected);
+                        debug("    Actual:   " + actual);
+                        return null;
                     }
-                } catch (IOException e) {
-                    error("Failed to calculate " + func.name() + " checksum: " + e.getMessage());
+                } catch (Exception e) {
+                    String message = "Failed to calculate " + func.name() + " checksum";
+                    error(message + " : " + e);
                     return null;
                 }
             }
-            if (!success)
-                return null;
         } else {
-            debug("    No checksum found, assuming existing file is valid");
+            debug("  No checksum found, assuming existing file is valid");
         }
 
         return archive;
@@ -316,28 +364,32 @@ public class Disco {
         return new File(cache, filename);
     }
 
-    public File extract(Package pkg) {
+    public @Nullable File extract(Package pkg) {
         File archive = new File(cache, pkg.filename);
-        if (!archive.exists())
+        if (!archive.exists()) {
             archive = download(pkg);
-
-        if (archive == null)
-            return null;
+            if (archive == null) {
+                error("Failed to download package: " + pkg.id);
+                return null;
+            }
+        }
 
         File extracted = getExtractedDir(pkg);
         return extract(archive, extracted, pkg.os(), pkg.archive());
     }
 
-    private File extract(File archive, File target, OS os, Archive format) {
-        String exeName = "bin/java" + OS.CURRENT.exe();
+    private @Nullable File extract(File archive, File target, OS os, Archive format) {
+        String exeName = "bin/java" + OS.current().exe();
         File exe = new File(target, exeName);
         if (exe.exists())
             return target;
 
         debug("Extracting " + archive + " to: " + target);
         target = target.getAbsoluteFile();
-        if (!target.exists())
-            target.mkdirs();
+        if (!target.exists() && !target.mkdirs()) {
+            error("Failed to create target directory: " + target);
+            return null;
+        }
 
         if (format == Disco.Archive.TAR || format == Disco.Archive.TGZ || format == Disco.Archive.TAR_GZ) {
             extractTar(exeName, archive, target, os, format == Disco.Archive.TGZ || format == Disco.Archive.TAR_GZ);
@@ -374,7 +426,7 @@ public class Disco {
             }
 
             if (prefix != null)
-                debug("   Prefix: " + prefix);
+                debug("  Prefix: " + prefix);
 
             for (ZipEntry entry : entries) {
                 int bits = getZipMode(entry.getExtra());
@@ -386,7 +438,7 @@ public class Disco {
                     return;
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            error("  Failed to extract zip file: " + archive.getName() + " : " + e);
         }
     }
 
@@ -462,19 +514,21 @@ public class Disco {
         //log("    Extracting: " + name);
         if (!out.getAbsolutePath().startsWith(target.getAbsolutePath())) {
             error("Failed to extract " + archive);
-            error("    Invalid file! " + name);
-            error("      Would not be extracted to target directory, could be malicious archive! Exiting");
+            error("  Invalid file! " + name);
+            error("    Would not be extracted to target directory, could be malicious archive! Exiting");
             return false;
         }
 
         File parent = out.getParentFile();
-        if (!parent.exists())
-            parent.mkdirs();
+        if (!parent.exists() && !parent.mkdirs()) {
+            error("Failed to create directory: " + parent);
+            return false;
+        }
 
         Files.copy(stream, out.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
         if (posix) {
-            Set<PosixFilePermission> perms = new HashSet<>();
+            Set<PosixFilePermission> perms = EnumSet.noneOf(PosixFilePermission.class);
             int mask = 0b100_000_000;
             for (PosixFilePermission perm : PosixFilePermission.values()) {
                 if ((bits & mask) != 0)
@@ -487,9 +541,9 @@ public class Disco {
         return true;
     }
 
-    private static InputStream getFileStream(File file, boolean gziped) throws IOException {
+    private static InputStream getFileStream(File file, boolean gzipped) throws IOException {
         InputStream stream = new FileInputStream(file);
-        if (gziped)
+        if (gzipped)
             stream = new GZIPInputStream(stream);
         return stream;
     }
@@ -506,13 +560,12 @@ public class Disco {
                 }
             }
         } catch (IOException e) {
-            error("    Failed to read tar file: " + e.getMessage());
-            e.printStackTrace();
+            error("  Failed to read tar file: " + archive + " : " + e);
             return;
         }
 
         if (prefix != null)
-            debug("    Prefix: " + prefix);
+            debug("  Prefix: " + prefix);
 
         boolean posix = Files.getFileAttributeView(target.toPath(), PosixFileAttributeView.class) != null;
         try (TarInputStream tar = new TarInputStream(getFileStream(archive, gziped))) {
@@ -524,34 +577,68 @@ public class Disco {
                     return;
             }
         } catch (IOException e) {
-            error("    Failed to extract: " + e.getMessage());
-            e.printStackTrace();
-            return;
+            error("  Failed to extract: " + archive + " : " + e);
         }
     }
 
-
-    private <T> T readJson(File input, TypeToken<T> type) {
-        if (!input.exists() || input.lastModified() < System.currentTimeMillis() - CACHE_TIMEOUT)
+    private <T> @Nullable T readJson(File input, TypeToken<T> type) {
+        if (!input.exists()) {
+            error("Failed to find cache file: " + input);
             return null;
+        }
+
+        if (!offline && input.lastModified() < System.currentTimeMillis() - CACHE_TIMEOUT) {
+            error("Cache file is stale, please redownload");
+            return null;
+        }
 
         try (FileReader reader = new FileReader(input)) {
             return GSON.fromJson(new JsonReader(reader), type);
-        } catch (IOException e) {
-            debug("Can not read cache file: " + e.getMessage());
+        } catch (Exception e) {
+            error("Failed to read cache file: " + input + " : " + e);
+            return null;
         }
-        return null;
     }
 
-    private static <T> void writeJson(File output, T data, Class<T> type) {
-        output.getParentFile().mkdirs();
+    private static <T> void writeJson(File output, T data, Class<T> type) throws IOException {
+        File parent = output.getParentFile();
+        if (!parent.exists() && !parent.mkdirs())
+            throw new IOException("Failed to create directory: " + parent);
+
         try (BufferedWriter out = Files.newBufferedWriter(output.toPath(), StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
             GSON.toJson(data, type, GSON.newJsonWriter(out));
-        } catch (IOException e) {
-            e.printStackTrace();
         }
     }
 
+    public static final class Locators {
+        private Locators() { }
+
+        public static JavaLocator gradle() {
+            return new GradleLocator();
+        }
+
+        public static JavaLocator home() {
+            return new JavaHomeLocator();
+        }
+
+        public static JavaLocator paths() {
+            return new JavaDirectoryLocator();
+        }
+
+        public static JavaLocator paths(File... dirs) {
+            return new JavaDirectoryLocator(Arrays.asList(dirs));
+        }
+
+        public static JavaProvisioner disco(File cache) {
+            return new DiscoLocator(cache);
+        }
+
+        public static JavaProvisioner disco(File cache, boolean offline) {
+            return new DiscoLocator(cache, offline);
+        }
+    }
+
+    // NOTE: We use our own Arch enum instead of OS Utils since Foojay has a lot of redundancies (x64 and x86_64)
     public enum Arch {
         X86("x86", "x86", "x32", "286"),
         X64,
@@ -581,7 +668,6 @@ public class Disco {
         UNKNOWN;
 
         private static final Arch[] $values = values();
-        public static final Arch CURRENT = getCurrent();
 
         private final Arch parent;
         private final String key;
@@ -611,6 +697,10 @@ public class Disco {
             return this == X64 || this == AMD64 || this == ARM64 || this == X86_64 || this == AARCH64 || this == PPC64 || this == PPC64EL || this == RISCV64;
         }
 
+        public boolean isArm() {
+            return this == ARM || this == ARM32 || this == ARM64 || this == AARCH32 || this == AARCH64 || this == RISCV64;
+        }
+
         public String key() {
             return this.key;
         }
@@ -623,6 +713,8 @@ public class Disco {
             return null;
         }
 
+        public static final Arch CURRENT = getCurrent();
+
         private static Arch getCurrent() {
             String prop = System.getProperty("os.arch").toLowerCase(Locale.ENGLISH);
             for (Arch value : $values) {
@@ -632,63 +724,8 @@ public class Disco {
                     }
                 }
             }
+
             return UNKNOWN;
-        }
-    }
-
-    public enum Distro implements Comparable<Distro> {
-        // These are well know/recommended distros
-        TEMURIN,
-        AOJ,
-        ZULU,
-
-        // Everything else
-        AOJ_OPENJ9,
-        BISHENG,
-        CORRETTO,
-        DRAGONWELL,
-        GRAALVM_CE8,
-        GRAALVM_CE11,
-        GRAALVM_CE16,
-        GRAALVM_CE17,
-        GRAALVM_CE19,
-        GRAALVM_CE20,
-        GRAALVM_COMMUNITY,
-        GRAALVM,
-        JETBRAINS,
-        KONA,
-        LIBERICA,
-        LIBERICA_NATIVE,
-        MANDREL,
-        MICROSOFT,
-        OJDK_BUILD,
-        OPENLOGIC,
-        ORACLE,
-        ORACLE_OPEN_JDK,
-        REDHAT,
-        SAP_MACHINE,
-        SEMERU,
-        SEMERU_CERTIFIED,
-        TRAVA,
-        ZULU_PRIME;
-
-        private static final Distro[] $values = values();
-        private final String key;
-
-        private Distro() {
-            this.key = this.name().toLowerCase(Locale.ENGLISH);
-        }
-
-        public String key() {
-            return this.key;
-        }
-
-        public static Distro byKey(String key) {
-            for (Distro value : $values) {
-                if (value.key.equals(key))
-                    return value;
-            }
-            return null;
         }
     }
 
@@ -761,10 +798,10 @@ public class Disco {
         }
         public static final LibC CURRENT = getCurrent();
 
-        private static final LibC getCurrent() {
-            if (OS.CURRENT == OS.MUSL)
+        private static LibC getCurrent() {
+            if (OS.current() == OS.MUSL)
                 return MUSL;
-            if (OS.CURRENT != OS.LINUX && OS.CURRENT != OS.ALPINE)
+            if (OS.current() != OS.LINUX && OS.current() != OS.ALPINE)
                 return GLIBC;
 
             ProcessUtils.Result getconf = ProcessUtils.runCommand("getconf", "GNU_LIBC_VERSION");
@@ -774,7 +811,7 @@ public class Disco {
                         return MUSL;
                 }
             } else {
-                Log.error("Failed to run `getconf GNU_LIBC_VERSION`: " + getconf.lines.get(0));
+                System.err.println("Failed to run `getconf GNU_LIBC_VERSION`: " + getconf.lines.get(0));;
             }
 
             ProcessUtils.Result ldd = ProcessUtils.runCommand("ldd", "--version");
@@ -784,7 +821,7 @@ public class Disco {
                         return MUSL;
                 }
             } else {
-                Log.error("Failed to run `ldd --version`: " + ldd.lines.get(0));
+                System.err.println("Failed to run `ldd --version`: " + ldd.lines.get(0));
             }
             return GLIBC;
         }
@@ -792,46 +829,45 @@ public class Disco {
 
     @SuppressWarnings("unused")
     private static class Response<T> {
-        public final String raw;
+        private final @Nullable String message;
         private final List<T> entries;
-        public final String message;
 
-        Response(String raw, final Class<T> clazz) {
-            this(raw, e -> GSON.fromJson(e, clazz));
+        static <T> Response<T> of(String raw, Class<T> clazz) throws Exception {
+            return of(raw, e -> GSON.fromJson(e, clazz));
         }
 
-        Response(String raw, Parser<T> converter) {
-            this.raw = raw;
+        static <T> Response<T> of(String raw, Parser<T> converter) throws Exception {
+            JsonObject root = GSON.fromJson(raw, JsonObject.class);
+            String message = root.has("message")
+                ? root.get("message").getAsString()
+                : null;
 
-            String message = null;
-            List<T> entries = null;
+            JsonArray result = root.getAsJsonArray("result");
+            if (result == null)
+                throw new Exception("Failed to parse response");
 
-            try {
-                JsonObject root = GSON.fromJson(raw, JsonObject.class);
-                if (root.has("message"))
-                    message = root.get("message").getAsString();
-
-                JsonArray result = root.getAsJsonArray("result");
-                if (result != null) {
-                    List<T> tmp = new ArrayList<>();
-                    for (JsonElement entry : result) {
-                        tmp.add(converter.apply(entry));
-                    }
-                    entries = Collections.unmodifiableList(tmp);
-                }
-            } catch (JsonSyntaxException e) {
-                e.printStackTrace();
+            List<T> entries = new ArrayList<>();
+            for (JsonElement entry : result) {
+                entries.add(converter.apply(entry));
             }
 
+            return new Response<>(message, entries);
+        }
+
+        private Response(@Nullable String message, List<T> entries) throws JsonParseException {
             this.message = message;
             this.entries = entries;
         }
 
-        public List<T> entries() {
-            return this.entries == null ? Collections.<T>emptyList() : this.entries;
+        public @Nullable String message() {
+            return this.message;
         }
 
-        public static interface Parser<T> {
+        public List<T> entries() {
+            return this.entries;
+        }
+
+        public interface Parser<T> {
             T apply(JsonElement e) throws JsonSyntaxException;
         }
     }
@@ -923,9 +959,9 @@ public class Disco {
 
         public String architecture;
         private transient Arch arch;
-        public Arch arch() {
+        public Disco.Arch arch() {
             if (arch == null && architecture != null)
-                arch = Arch.byKey(architecture);
+                arch = Disco.Arch.byKey(architecture);
             return arch;
         }
 
@@ -976,13 +1012,13 @@ public class Disco {
      *}
      */
     public static class PackageInfo {
-        public final String filename = null;
-        public final String direct_download_uri = null;
-        public final String download_side_uri = null;
-        public final String signature_uri = null;
-        public final String checksum_uri = null;
-        public final String checksum = null;
-        public final String checksum_type = null;
+        public String filename;
+        public String direct_download_uri;
+        public String download_side_uri;
+        public String signature_uri;
+        public String checksum_uri;
+        public String checksum;
+        public String checksum_type;
     }
 
     // Just a helper class that wraps all the information we know about a file, saved in the cache for easy reference
