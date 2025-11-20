@@ -11,13 +11,15 @@ import java.util.Locale;
 public enum Distro implements Comparable<Distro> {
     // Preferred Distros
     MICROSOFT,       // Used by Minecraft
-    ORACLE_OPEN_JDK, // OpenJDK, straight from jdk.java.net
     TEMURIN,         // Trusted build of OpenJDK by Eclipse Adoptium
     ZULU,            // next best from Zulu, has macOS ARM support for Java 8
 
     // Highlights from the others
     JETBRAINS, // DCEVM, has optimizations for swing, but is otherwise standard
     CORRETTO,  // Amazon, has optimizations for containers/cloud
+
+    // Vanilla OpenJDK -- Windows uses older builds, outdated builds from AdoptOpenJDK, unfortunately.
+    ORACLE_OPEN_JDK,
 
     // Everything else
     DEBIAN,
