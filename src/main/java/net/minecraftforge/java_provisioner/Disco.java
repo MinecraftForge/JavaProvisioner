@@ -12,6 +12,8 @@ import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -117,8 +119,20 @@ public class Disco {
         System.out.println(message);
     }
 
+    protected final void debug(Throwable exception) {
+        StringWriter string = new StringWriter();
+        exception.printStackTrace(new PrintWriter(string, true));
+        debug(string.toString());
+    }
+
     protected void error(String message) {
         System.err.println(message);
+    }
+
+    protected final void error(Throwable exception) {
+        StringWriter string = new StringWriter();
+        exception.printStackTrace(new PrintWriter(string, true));
+        error(string.toString());
     }
 
     public List<Package> getPackages() {
@@ -143,7 +157,8 @@ public class Disco {
         try {
             data = DownloadUtils.downloadString(url);
         } catch (IOException e) {
-            error("Failed to download package list from " + url + ": " + e);
+            error("Failed to download package list from " + url);
+            error(e);
             return Collections.emptyList();
         }
 
@@ -151,7 +166,8 @@ public class Disco {
         try {
             resp = Response.of(data, Package.class);
         } catch (Exception e) {
-            error("Failed to parse package list from " + url + ": " + e);
+            error("Failed to parse package list from " + url);
+            error(e);
             return Collections.emptyList();
         }
 
@@ -163,7 +179,8 @@ public class Disco {
         try {
             writeJson(tmp, resp.entries(), List.class);
         } catch (IOException e) {
-            error("Failed to write package list to " + tmp.getAbsolutePath() + ": " + e);
+            error("Failed to write package list to " + tmp.getAbsolutePath());
+            error(e);
             return Collections.emptyList();
         }
 
@@ -235,7 +252,8 @@ public class Disco {
         try {
             data = DownloadUtils.downloadString(url);
         } catch (IOException e) {
-            error("Failed to download package info from " + url + " : " + e);
+            error("Failed to download package info from " + url);
+            error(e);
             return null;
         }
 
@@ -243,7 +261,8 @@ public class Disco {
         try {
             resp = Response.of(data, PackageInfo.class);
         } catch (Exception e) {
-            error("Failed to parse package info from " + url + " : " + e);
+            error("Failed to parse package info from " + url);
+            error(e);
             return null;
         }
 
@@ -258,7 +277,8 @@ public class Disco {
         try {
             writeJson(tmp, ret, DownloadInfo.class);
         } catch (IOException e) {
-            error("Failed to write package info to " + tmp.getAbsolutePath() + " : " + e);
+            error("Failed to write package info to " + tmp.getAbsolutePath());
+            error(e);
             return null;
         }
 
@@ -290,14 +310,16 @@ public class Disco {
                     else
                         debug("Unknown Checksum " + checksum);
                 } catch (IOException e) {
-                    error("Failed to download checksum from " + info.checksum_uri + " : " + e);
+                    error("Failed to download checksum from " + info.checksum_uri);
+                    error(e);
                 }
             }
 
             if (info.direct_download_uri != null)
                 download = info.direct_download_uri;
         } catch (Exception e) {
-            debug("Failed to download package info for \"" + pkg.filename + "\" (" + pkg.id + ") , assuming redirect link is valid : " + e);
+            debug("Failed to download package info for \"" + pkg.filename + "\" (" + pkg.id + ") , assuming redirect link is valid");
+            debug(e);
         }
 
         File archive = new File(cache, pkg.filename);
@@ -313,8 +335,8 @@ public class Disco {
             try {
                 DownloadUtils.downloadFile(archive, download);
             } catch (Exception e) {
-                String message = "Failed to download " + pkg.filename + " from " + download;
-                error(message);
+                error("Failed to download " + pkg.filename + " from " + download);
+                error(e);
                 return null;
             }
         }
@@ -335,8 +357,8 @@ public class Disco {
                         return null;
                     }
                 } catch (Exception e) {
-                    String message = "Failed to calculate " + func.name() + " checksum";
-                    error(message + " : " + e);
+                    error("Failed to calculate " + func.name() + " checksum");
+                    error(e);
                     return null;
                 }
             }
@@ -438,7 +460,8 @@ public class Disco {
                     return;
             }
         } catch (IOException e) {
-            error("  Failed to extract zip file: " + archive.getName() + " : " + e);
+            error("  Failed to extract zip file: " + archive.getName());
+            error(e);
         }
     }
 
@@ -560,7 +583,8 @@ public class Disco {
                 }
             }
         } catch (IOException e) {
-            error("  Failed to read tar file: " + archive + " : " + e);
+            error("  Failed to read tar file: " + archive);
+            error(e);
             return;
         }
 
@@ -577,7 +601,8 @@ public class Disco {
                     return;
             }
         } catch (IOException e) {
-            error("  Failed to extract: " + archive + " : " + e);
+            error("  Failed to extract: " + archive);
+            error(e);
         }
     }
 
@@ -595,7 +620,8 @@ public class Disco {
         try (FileReader reader = new FileReader(input)) {
             return GSON.fromJson(new JsonReader(reader), type);
         } catch (Exception e) {
-            error("Failed to read cache file: " + input + " : " + e);
+            error("Failed to read cache file: " + input);
+            error(e);
             return null;
         }
     }
