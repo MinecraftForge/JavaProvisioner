@@ -7,8 +7,6 @@ package net.minecraftforge.java_provisioner;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-
 import net.minecraftforge.java_provisioner.api.JavaInstall;
 import net.minecraftforge.java_provisioner.api.JavaLocator;
 import net.minecraftforge.java_provisioner.api.JavaProvisionerException;

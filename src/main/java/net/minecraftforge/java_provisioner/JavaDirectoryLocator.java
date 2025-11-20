@@ -8,13 +8,11 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 import net.minecraftforge.java_provisioner.api.JavaInstall;
 import net.minecraftforge.java_provisioner.api.JavaProvisionerException;
 import net.minecraftforge.util.os.OS;
-import org.jetbrains.annotations.Nullable;
 
 /*
  * Attempts to find the java install from specific folders.
@@ -24,6 +22,8 @@ final class JavaDirectoryLocator extends JavaHomeLocator {
     private final Collection<File> paths;
 
     private static Collection<File> guesses() {
+        File userHome = new File(System.getProperty("user.home"));
+
         Collection<File> ret = new ArrayList<>();
         if (OS.current() == OS.WINDOWS) { // Windows
             for (File root : File.listRoots()) {
@@ -44,11 +44,28 @@ final class JavaDirectoryLocator extends JavaHomeLocator {
             ret.add(new File("/opt/jdks"));
         }
 
+        // IntelliJ
+        ret.add(new File(userHome, OS.current() == OS.MACOS ? "/Library/Java/JavaVirtualMachines" : ".jdks"));
+
+        // JABBA
+        ret.add(new File(userHome, ".jabba/jdks"));
+        String JABBA_HOME = System.getenv("JABBA_HOME");
+        if (JABBA_HOME != null)
+            ret.add(new File(new File(JABBA_HOME), "jdks"));
+
+        // SDKMan
+        ret.add(new File(userHome, ".sdkman/candidates/java"));
+
+        // ASDF
+        ret.add(new File(userHome, ".asdf/installs/java"));
+        String ASDF_DATA_DIR = System.getenv("ASDF_DATA_DIR");
+        if (ASDF_DATA_DIR != null)
+            ret.add(new File(new File(ASDF_DATA_DIR), "installs/java"));
+
         ret.removeIf(f -> !f.exists() || !f.isDirectory());
 
         return ret;
     }
-
 
     public JavaDirectoryLocator() {
         this(guesses());
