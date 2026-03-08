@@ -8,8 +8,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
-
 import net.minecraftforge.java_provisioner.api.Distro;
 import net.minecraftforge.java_provisioner.api.JavaInstall;
 import net.minecraftforge.java_provisioner.api.JavaProvisioner;

@@ -22,8 +22,8 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -286,7 +286,7 @@ public class Disco {
     }
 
     public @Nullable File download(Package pkg) {
-        Map<HashFunction, String> checksums = new EnumMap<>(HashFunction.class);
+        Map<HashFunction, String> checksums = new IdentityHashMap<>();
         String download = pkg.links.pkg_download_redirect;
 
         //debug("Downloading " + pkg.filename);
@@ -294,7 +294,7 @@ public class Disco {
             PackageInfo info = getInfo(pkg);
 
             if (info.checksum != null && info.checksum_type != null) {
-                HashFunction func = HashFunction.find(info.checksum_type);
+                HashFunction func = HashFunction.byName(info.checksum_type);
                 if (func != null)
                     checksums.put(func, info.checksum);
                 else
@@ -304,7 +304,7 @@ public class Disco {
                     String raw = DownloadUtils.downloadString(info.checksum_uri);
 
                     String checksum = raw.split(" ")[0];
-                    HashFunction func = HashFunction.findByHash(checksum);
+                    HashFunction func = findByHash(checksum);
                     if (func != null)
                         checksums.put(func, checksum);
                     else
@@ -349,15 +349,15 @@ public class Disco {
                     String actual = func.hash(archive);
                     String expected = entry.getValue();
                     if (expected.equals(actual)) {
-                        debug("  " + func.name() + " Validated");
+                        debug("  " + func.extension() + " Validated");
                     } else {
-                        debug("  " + func.name() + " Invalid");
+                        debug("  " + func.extension() + " Invalid");
                         debug("    Expected: " + expected);
                         debug("    Actual:   " + actual);
                         return null;
                     }
                 } catch (Exception e) {
-                    error("Failed to calculate " + func.name() + " checksum");
+                    error("Failed to calculate " + func.extension() + " checksum");
                     error(e);
                     return null;
                 }
@@ -367,6 +367,15 @@ public class Disco {
         }
 
         return archive;
+    }
+
+    private HashFunction findByHash(String checksum) {
+        int len = checksum.length();
+        if (len == 32) return HashFunction.md5();
+        if (len == 40) return HashFunction.sha1();
+        if (len == 64) return HashFunction.sha256();
+        if (len == 128) return HashFunction.sha512();
+        return null;
     }
 
     private File getExtractedDir(Package pkg) {

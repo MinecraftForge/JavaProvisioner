@@ -21,7 +21,7 @@ dependencyResolutionManagement {
         library 'jtar', 'org.kamranzafar:jtar:2.3'
 
         library 'utils-download', 'net.minecraftforge', 'download-utils'  version '0.4.0'
-        library 'utils-hash', 'net.minecraftforge', 'hash-utils' version '0.1.9'
+        library 'utils-hash', 'net.minecraftforge', 'hash-utils' version '0.2.2'
         library 'utils-os', 'net.minecraftforge', 'os-utils' version '0.1.0'
         bundle 'utils', ['utils-download', 'utils-hash', 'utils-os']
     }

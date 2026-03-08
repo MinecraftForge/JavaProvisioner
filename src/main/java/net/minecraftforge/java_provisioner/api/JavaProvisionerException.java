@@ -7,6 +7,7 @@ package net.minecraftforge.java_provisioner.api;
 import java.util.Collections;
 import java.util.List;
 
+@SuppressWarnings("serial")
 public class JavaProvisionerException extends Exception {
     private final List<String> logOutput;
 
