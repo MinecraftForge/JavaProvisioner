@@ -125,6 +125,11 @@ final class DiscoLocator extends JavaHomeLocator implements JavaProvisioner {
         }
 
         log("Found " + jdks.size() + " download candidates");
+        if (jdks.isEmpty()) {
+            String message = String.format("Failed to find any JDKs from Disco for: %s%d - %s %s", distro != null ? distro + " " : "", version, OS.current(), Disco.Arch.CURRENT);
+            log(message);
+            throw new JavaProvisionerException(message, logOutput());
+        }
         Disco.Package pkg = jdks.get(0);
         log("Selected " + pkg.distribution + ": " + pkg.filename);
 
