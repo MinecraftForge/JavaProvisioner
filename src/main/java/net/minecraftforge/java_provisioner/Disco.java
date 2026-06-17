@@ -410,7 +410,7 @@ public class Disco {
     }
 
     private @Nullable File extract(File archive, File target, OS os, Archive format) {
-        String exeName = "bin/java" + OS.current().exe();
+        String exeName = "bin/javac" + OS.current().exe();
         File exe = new File(target, exeName);
         if (exe.exists())
             return target;
